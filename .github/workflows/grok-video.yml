@@ -1,0 +1,97 @@
+name: Generate TikTok video with Grok
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_prompt:
+        description: "文生图提示词（建议描述主体、场景、光线、构图和 9:16 竖屏）"
+        required: true
+        type: string
+      video_prompt:
+        description: "图生视频提示词（建议描述动作、运镜、节奏和保持产品一致性）"
+        required: true
+        type: string
+      duration:
+        description: "视频时长（秒）"
+        required: true
+        default: "10"
+        type: choice
+        options:
+          - "5"
+          - "8"
+          - "10"
+          - "12"
+          - "15"
+      video_resolution:
+        description: "视频分辨率"
+        required: true
+        default: "720p"
+        type: choice
+        options:
+          - "480p"
+          - "720p"
+          - "1080p"
+      dry_run:
+        description: "仅检查请求，不调用付费 API"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: grok-video-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    name: Image to video
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      IMAGE_PROMPT: ${{ inputs.image_prompt }}
+      VIDEO_PROMPT: ${{ inputs.video_prompt }}
+      DURATION: ${{ inputs.duration }}
+      VIDEO_RESOLUTION: ${{ inputs.video_resolution }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate secret
+        if: inputs.dry_run == false
+        shell: bash
+        run: |
+          if [[ -z "$XAI_API_KEY" ]]; then
+            echo "::error::Add XAI_API_KEY in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - name: Build image and video
+        shell: bash
+        run: |
+          args=(
+            --image-prompt "$IMAGE_PROMPT"
+            --video-prompt "$VIDEO_PROMPT"
+            --aspect-ratio "9:16"
+            --image-resolution "1k"
+            --video-resolution "$VIDEO_RESOLUTION"
+            --duration "$DURATION"
+            --output-dir "output"
+          )
+          if [[ "$DRY_RUN" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          python3 scripts/grok_video_pipeline.py "${args[@]}"
+
+      - name: Upload prompts and generated media
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grok-video-${{ github.run_number }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 7
